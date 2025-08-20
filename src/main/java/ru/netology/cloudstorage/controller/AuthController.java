@@ -10,8 +10,8 @@ import ru.netology.cloudstorage.service.AuthService;
 import ru.netology.cloudstorage.util.PasswordUtil;
 
 @RestController
-@RequestMapping("/")
 @RequiredArgsConstructor
+@RequestMapping("/cloud")
 public class AuthController {
 
     private final AuthService authService;
@@ -34,14 +34,19 @@ public class AuthController {
     public ResponseEntity<LoginResponseWrapper> login(@RequestBody LoginRequest request) {
         try {
             String token = authService.login(request.login(), request.password());
-            // Успешная авторизация: массивы пустые
-            return ResponseEntity.ok(new LoginResponseWrapper(token, new String[]{}, new String[]{}));
+
+            User user = userRepository.findByLogin(request.login())
+                    .orElseThrow();
+
+            return ResponseEntity.ok(new LoginResponseWrapper(
+                    token,
+                    new String[]{ user.getLogin() }  // только email
+            ));
         } catch (RuntimeException ex) {
-            String message = ex.getMessage().toLowerCase().contains("пароль") ? ex.getMessage() : "";
-            String loginError = ex.getMessage().toLowerCase().contains("пользователь") ? ex.getMessage() : "";
-            return ResponseEntity.ok(new LoginResponseWrapper(null,
-                    loginError.isEmpty() ? new String[]{} : new String[]{loginError},
-                    message.isEmpty() ? new String[]{} : new String[]{message}));
+            return ResponseEntity.status(401).body(new LoginResponseWrapper(
+                    null,
+                    new String[]{ ex.getMessage() }
+            ));
         }
     }
 

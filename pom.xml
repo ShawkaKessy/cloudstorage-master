@@ -88,6 +88,13 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>${spring.boot.version}</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
 
             <!-- Maven Compiler Plugin -->
@@ -102,7 +109,7 @@
                         <arg>-parameters</arg>
                     </compilerArgs>
                     <annotationProcessorPaths>
-                        <!-- 🔥 добавляем поддержку Lombok -->
+                        <!-- Lombok -->
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
@@ -113,4 +120,5 @@
             </plugin>
         </plugins>
     </build>
+
 </project>

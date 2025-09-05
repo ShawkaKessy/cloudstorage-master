@@ -28,11 +28,8 @@ public class AuthServiceImpl implements AuthService {
             throw new UnauthorizedException("Неверный пароль");
         }
 
-        authTokenRepository.deleteAll(
-                authTokenRepository.findAll().stream()
-                        .filter(t -> t.getUser().equals(user))
-                        .toList()
-        );
+        // удаляем все токены пользователя
+        authTokenRepository.deleteByUser(user);
 
         String token = TokenUtil.generateToken();
         AuthToken authToken = new AuthToken();
@@ -42,7 +39,6 @@ public class AuthServiceImpl implements AuthService {
 
         return token;
     }
-
 
     @Override
     @Transactional

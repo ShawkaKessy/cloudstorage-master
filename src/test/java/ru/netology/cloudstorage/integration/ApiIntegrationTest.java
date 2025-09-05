@@ -9,6 +9,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import ru.netology.cloudstorage.dto.LoginResponse;
 import ru.netology.cloudstorage.entity.User;
 import ru.netology.cloudstorage.repository.AuthTokenRepository;
 import ru.netology.cloudstorage.repository.FileRepository;
@@ -17,21 +20,28 @@ import ru.netology.cloudstorage.util.PasswordUtil;
 
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
+@Testcontainers
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
-@Testcontainers
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ApiIntegrationTest {
 
     @Container
-    public static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16")
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("testdb")
             .withUsername("user")
             .withPassword("password");
+
+    @DynamicPropertySource
+    static void registerPgProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.datasource.driver-class-name", () -> "org.postgresql.Driver");
+        registry.add("spring.jpa.hibernate.ddl-auto", () -> "create-drop");
+    }
 
     @Autowired
     private TestRestTemplate restTemplate;
@@ -49,32 +59,36 @@ class ApiIntegrationTest {
     private String testEmail;
     private final String TEST_PASSWORD = "password123";
 
-    @BeforeAll
-    static void initAll() {
-        postgres.start();
-        System.setProperty("spring.datasource.url", postgres.getJdbcUrl());
-        System.setProperty("spring.datasource.username", postgres.getUsername());
-        System.setProperty("spring.datasource.password", postgres.getPassword());
-    }
-
     @BeforeEach
     void setup() {
+        // Очищаем базы
         authTokenRepository.deleteAll();
         fileRepository.deleteAll();
         userRepository.deleteAll();
 
+        // Создаём пользователя
         testEmail = "user-" + UUID.randomUUID() + "@example.com";
         User user = new User(testEmail, PasswordUtil.hash(TEST_PASSWORD));
         userRepository.save(user);
 
+        // Логинимся и получаем токен
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-
         String loginJson = "{\"email\":\"" + testEmail + "\",\"password\":\"" + TEST_PASSWORD + "\"}";
         HttpEntity<String> request = new HttpEntity<>(loginJson, headers);
 
-        ResponseEntity<String> response = restTemplate.postForEntity("/login", request, String.class);
-        token = response.getHeaders().getFirst("auth-token");
+        ResponseEntity<LoginResponse> response = restTemplate.postForEntity("/login", request, LoginResponse.class);
+        assertEquals(HttpStatus.OK, response.getStatusCode(), "Логин не прошёл");
+
+        token = response.getBody().authToken();
+        assertNotNull(token, "Токен не получен");
+    }
+
+    private HttpHeaders authHeaders(MediaType contentType) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("auth-token", token);
+        headers.setContentType(contentType);
+        return headers;
     }
 
     @Test
@@ -83,18 +97,8 @@ class ApiIntegrationTest {
         String filename = "test.txt";
         byte[] content = "Hello world".getBytes();
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("auth-token", token);
-        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-
-        HttpEntity<byte[]> requestEntity = new HttpEntity<>(content, headers);
-
-        ResponseEntity<Void> response = restTemplate.exchange(
-                "/upload/" + filename,
-                HttpMethod.POST,
-                requestEntity,
-                Void.class
-        );
+        HttpEntity<byte[]> requestEntity = new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM));
+        ResponseEntity<Void> response = restTemplate.exchange("/upload/" + filename, HttpMethod.POST, requestEntity, Void.class);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
     }
@@ -105,26 +109,14 @@ class ApiIntegrationTest {
         String filename = "download.txt";
         byte[] content = "Download test".getBytes();
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("auth-token", token);
-        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        // Загружаем файл
+        restTemplate.exchange("/upload/" + filename, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
 
-        restTemplate.exchange(
-                "/upload/" + filename,
-                HttpMethod.POST,
-                new HttpEntity<>(content, headers),
-                Void.class
-        );
-
-        ResponseEntity<byte[]> response = restTemplate.exchange(
-                "/download/" + filename,
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                byte[].class
-        );
+        // Скачиваем файл
+        ResponseEntity<byte[]> response = restTemplate.exchange("/download/" + filename, HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_OCTET_STREAM)), byte[].class);
 
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals(new String(content), new String(response.getBody()));
+        assertArrayEquals(content, response.getBody());
     }
 
     @Test
@@ -134,35 +126,19 @@ class ApiIntegrationTest {
         String newName = "new.txt";
         byte[] content = "Rename test".getBytes();
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("auth-token", token);
-        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        // Загружаем старый файл
+        restTemplate.exchange("/upload/" + oldName, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
 
-        restTemplate.exchange(
-                "/upload/" + oldName,
-                HttpMethod.POST,
-                new HttpEntity<>(content, headers),
-                Void.class
-        );
-
+        // Переименовываем файл
         String renameJson = "{\"oldFilename\":\"" + oldName + "\",\"newFilename\":\"" + newName + "\"}";
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        restTemplate.exchange(
-                "/file",
-                HttpMethod.PUT,
-                new HttpEntity<>(renameJson, headers),
-                Void.class
-        );
+        HttpEntity<String> renameRequest = new HttpEntity<>(renameJson, authHeaders(MediaType.APPLICATION_JSON));
+        ResponseEntity<Void> renameResponse = restTemplate.exchange("/file", HttpMethod.PUT, renameRequest, Void.class);
+        assertEquals(HttpStatus.OK, renameResponse.getStatusCode());
 
-        ResponseEntity<byte[]> response = restTemplate.exchange(
-                "/download/" + newName,
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                byte[].class
-        );
-
+        // Проверяем новый файл
+        ResponseEntity<byte[]> response = restTemplate.exchange("/download/" + newName, HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_OCTET_STREAM)), byte[].class);
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertEquals(new String(content), new String(response.getBody()));
+        assertArrayEquals(content, response.getBody());
     }
 
     @Test
@@ -171,26 +147,11 @@ class ApiIntegrationTest {
         String[] filenames = {"file1.txt", "file2.txt"};
         byte[] content = "List test".getBytes();
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("auth-token", token);
-        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
-
         for (String filename : filenames) {
-            restTemplate.exchange(
-                    "/upload/" + filename,
-                    HttpMethod.POST,
-                    new HttpEntity<>(content, headers),
-                    Void.class
-            );
+            restTemplate.exchange("/upload/" + filename, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
         }
 
-        ResponseEntity<String> response = restTemplate.exchange(
-                "/list",
-                HttpMethod.GET,
-                new HttpEntity<>(headers),
-                String.class
-        );
-
+        ResponseEntity<String> response = restTemplate.exchange("/list", HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_JSON)), String.class);
         assertEquals(HttpStatus.OK, response.getStatusCode());
         for (String filename : filenames) {
             assertTrue(response.getBody().contains(filename), "Список файлов должен содержать " + filename);

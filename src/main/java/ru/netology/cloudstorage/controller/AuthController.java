@@ -15,8 +15,8 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
-        String token = authService.login(request.login(), request.password());
-        return ResponseEntity.ok(new LoginResponse(token, request.login()));
+        String token = authService.login(request.email(), request.password());
+        return ResponseEntity.ok(new LoginResponse(token, request.email()));
     }
 
     @PostMapping("/logout")

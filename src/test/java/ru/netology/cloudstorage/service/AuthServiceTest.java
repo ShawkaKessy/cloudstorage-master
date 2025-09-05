@@ -1,97 +1,93 @@
 package ru.netology.cloudstorage.service;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import ru.netology.cloudstorage.entity.AuthToken;
 import ru.netology.cloudstorage.entity.User;
+import ru.netology.cloudstorage.exception.UnauthorizedException;
 import ru.netology.cloudstorage.repository.AuthTokenRepository;
+import ru.netology.cloudstorage.repository.FileRepository;
 import ru.netology.cloudstorage.repository.UserRepository;
 import ru.netology.cloudstorage.util.PasswordUtil;
 
-import java.util.Optional;
+import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
-@ExtendWith(MockitoExtension.class)
+@SpringBootTest
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ActiveProfiles("test")
 class AuthServiceTest {
 
-    @Mock
+    @Autowired
+    private AuthService authService;
+
+    @Autowired
     private UserRepository userRepository;
 
-    @Mock
+    @Autowired
+    private FileRepository fileRepository;
+
+    @Autowired
     private AuthTokenRepository authTokenRepository;
 
-    @InjectMocks
-    private AuthServiceImpl authService;
+    private String testEmail;
+    private final String TEST_PASSWORD = "password";
 
-    @Test
-    void testLoginSuccess() {
-        User user = new User();
-        user.setLogin("test");
-        user.setPassword(PasswordUtil.hash("pass"));
+    @BeforeEach
+    void setup() {
+        authTokenRepository.deleteAll();
+        fileRepository.deleteAll();
+        userRepository.deleteAll();
 
-        when(userRepository.findByLogin("test")).thenReturn(Optional.of(user));
-
-        String token = authService.login("test", "pass");
-
-        assertNotNull(token);
-        verify(authTokenRepository).save(any(AuthToken.class));
+        testEmail = "auth-" + UUID.randomUUID() + "@example.com";
+        User user = new User(testEmail, PasswordUtil.hash(TEST_PASSWORD));
+        userRepository.save(user);
     }
 
     @Test
-    void testLoginWrongPassword() {
-        User user = new User();
-        user.setLogin("test");
-        user.setPassword(PasswordUtil.hash("pass"));
+    @Order(1)
+    void loginGeneratesToken() {
+        String token = authService.login(testEmail, TEST_PASSWORD);
+        assertNotNull(token, "Токен не должен быть null");
 
-        when(userRepository.findByLogin("test")).thenReturn(Optional.of(user));
-
-        assertThrows(RuntimeException.class,
-                () -> authService.login("test", "wrongpass"));
+        List<AuthToken> tokens = authTokenRepository.findAll();
+        assertEquals(1, tokens.size(), "Должен быть один токен в базе");
+        assertEquals(testEmail, tokens.get(0).getUser().getEmail());
+        assertEquals(token, tokens.get(0).getToken());
     }
 
     @Test
-    void testLoginUserNotFound() {
-        when(userRepository.findByLogin("unknown")).thenReturn(Optional.empty());
-
-        assertThrows(RuntimeException.class,
-                () -> authService.login("unknown", "pass"));
+    @Order(2)
+    void loginWithWrongPasswordThrows() {
+        UnauthorizedException exception = assertThrows(UnauthorizedException.class,
+                () -> authService.login(testEmail, "wrongpassword"));
+        assertTrue(exception.getMessage().contains("Неверный пароль"));
     }
 
     @Test
-    void testGetUserByTokenSuccess() {
-        User user = new User();
-        user.setLogin("test");
-
-        AuthToken authToken = new AuthToken();
-        authToken.setToken("abc");
-        authToken.setUser(user);
-
-        when(authTokenRepository.findByToken("abc")).thenReturn(Optional.of(authToken));
-
-        User result = authService.getUserByToken("abc");
-
-        assertEquals("test", result.getLogin());
-    }
-
-    @Test
-    void testGetUserByTokenNotFound() {
-        when(authTokenRepository.findByToken("badtoken")).thenReturn(Optional.empty());
-
-        assertThrows(RuntimeException.class,
-                () -> authService.getUserByToken("badtoken"));
-    }
-
-    @Test
-    void testLogout() {
-        String token = "abc";
-
+    @Order(3)
+    void logoutDeletesToken() {
+        String token = authService.login(testEmail, TEST_PASSWORD);
         authService.logout(token);
+        assertTrue(authTokenRepository.findByToken(token).isEmpty(), "Токен должен быть удалён после logout");
+    }
 
-        verify(authTokenRepository).deleteByToken(token);
+    @Test
+    @Order(4)
+    void getUserByTokenReturnsCorrectUser() {
+        String token = authService.login(testEmail, TEST_PASSWORD);
+        User user = authService.getUserByToken(token);
+        assertEquals(testEmail, user.getEmail(), "Возвращённый пользователь должен совпадать с email");
+    }
+
+    @Test
+    @Order(5)
+    void getUserByInvalidTokenThrows() {
+        assertThrows(UnauthorizedException.class,
+                () -> authService.getUserByToken("invalid-token"), "Должно кидать UnauthorizedException для некорректного токена");
     }
 }

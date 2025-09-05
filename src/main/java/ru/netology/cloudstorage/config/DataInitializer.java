@@ -21,9 +21,7 @@ public class DataInitializer {
 
     @PostConstruct
     public void init() {
-        User user = new User();
-        user.setLogin("testuser@example.com");
-        user.setPassword(PasswordUtil.hash("123456")); // пример пароля
+        User user = new User("testuser@example.com", PasswordUtil.hash("123456"));
         userRepository.save(user);
 
         AuthToken token1 = new AuthToken();

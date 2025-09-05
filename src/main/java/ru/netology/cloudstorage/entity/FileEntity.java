@@ -1,18 +1,21 @@
 package ru.netology.cloudstorage.entity;
 
 import jakarta.persistence.*;
-import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
 
 @Entity
 @Table(name = "files")
-@Data
+@Getter
+@Setter
 public class FileEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne
-    @JoinColumn(name = "owner_id", nullable = false)
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "owner_id")
     private User owner;
 
     @Column(nullable = false)

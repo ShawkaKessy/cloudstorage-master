@@ -3,15 +3,13 @@ package ru.netology.cloudstorage.controller;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
 import ru.netology.cloudstorage.dto.FileResponse;
+import ru.netology.cloudstorage.dto.RenameFileRequest;
 import ru.netology.cloudstorage.entity.User;
 import ru.netology.cloudstorage.service.AuthService;
 import ru.netology.cloudstorage.service.FileService;
 
-import java.io.IOException;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -24,38 +22,40 @@ public class FileController {
         return authService.getUserByToken(token);
     }
 
-    @PostMapping("/file")
+    @PostMapping("/upload/{filename}")
     public ResponseEntity<Void> uploadFile(@RequestHeader("auth-token") String token,
-                                           @RequestParam String filename,
-                                           @RequestParam("file") MultipartFile multipartFile) throws IOException {
-        fileService.uploadFile(auth(token), filename, multipartFile.getBytes());
+                                           @PathVariable String filename,
+                                           @RequestBody byte[] content) {
+        fileService.uploadFile(auth(token), filename, content);
         return ResponseEntity.ok().build();
     }
 
-    @GetMapping("/file")
+    @GetMapping("/download/{filename}")
     public ResponseEntity<byte[]> downloadFile(@RequestHeader("auth-token") String token,
-                                               @RequestParam String filename) {
+                                               @PathVariable String filename) {
         byte[] content = fileService.downloadFile(auth(token), filename);
         return ResponseEntity.ok()
                 .header("Content-Disposition", "attachment; filename=\"" + filename + "\"")
                 .body(content);
     }
 
-    @DeleteMapping("/file")
+    @DeleteMapping("/delete/{filename}")
     public ResponseEntity<Void> deleteFile(@RequestHeader("auth-token") String token,
-                                           @RequestParam String filename) {
+                                           @PathVariable String filename) {
         fileService.deleteFile(auth(token), filename);
         return ResponseEntity.ok().build();
     }
 
     @PutMapping("/file")
-    public ResponseEntity<Void> renameFile(@RequestHeader("auth-token") String token,
-                                           @RequestParam String filename,
-                                           @RequestBody Map<String, String> body) {
-        String newName = body.get("name");
-        fileService.renameFile(auth(token), filename, newName);
+    public ResponseEntity<Void> renameFile(
+            @RequestHeader("auth-token") String token,
+            @RequestBody RenameFileRequest request) {
+
+        User user = auth(token);
+        fileService.renameFile(user, request.oldFilename(), request.newFilename());
         return ResponseEntity.ok().build();
     }
+
 
     @GetMapping("/list")
     public List<FileResponse> listFiles(@RequestHeader("auth-token") String token,

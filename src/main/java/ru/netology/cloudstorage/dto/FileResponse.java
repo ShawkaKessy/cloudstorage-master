@@ -1,4 +1,8 @@
 package ru.netology.cloudstorage.dto;
 
-public record FileResponse(String filename, long size) {
-}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record FileResponse(
+        @JsonProperty("filename") String filename,
+        @JsonProperty("size") long size
+) {}

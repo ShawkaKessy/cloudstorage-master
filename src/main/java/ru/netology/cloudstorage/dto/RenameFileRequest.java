@@ -1,4 +1,8 @@
 package ru.netology.cloudstorage.dto;
 
-public record RenameFileRequest(String oldFilename, String newFilename) {
-}
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public record RenameFileRequest(
+        @JsonProperty("oldFilename") String oldFilename,
+        @JsonProperty("newFilename") String newFilename
+) {}

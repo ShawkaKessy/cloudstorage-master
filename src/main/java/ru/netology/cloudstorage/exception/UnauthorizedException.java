@@ -1,11 +1,17 @@
 package ru.netology.cloudstorage.exception;
 
+import java.util.Map;
+
 public class UnauthorizedException extends RuntimeException {
-    public UnauthorizedException() {
+
+    private final Map<String, String[]> errors;
+
+    public UnauthorizedException(Map<String, String[]> errors) {
         super("Unauthorized");
+        this.errors = errors;
     }
 
-    public UnauthorizedException(String message) {
-        super(message);
+    public Map<String, String[]> getErrors() {
+        return errors;
     }
 }

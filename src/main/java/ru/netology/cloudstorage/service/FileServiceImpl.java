@@ -5,7 +5,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.netology.cloudstorage.entity.FileEntity;
 import ru.netology.cloudstorage.entity.User;
+import ru.netology.cloudstorage.exception.FileNotFoundException;
 import ru.netology.cloudstorage.repository.FileRepository;
+
 import java.util.List;
 
 @Service
@@ -28,7 +30,7 @@ public class FileServiceImpl implements FileService {
     @Transactional(readOnly = true)
     public byte[] downloadFile(User owner, String filename) {
         FileEntity file = fileRepository.findByOwnerAndFilename(owner, filename)
-                .orElseThrow(() -> new RuntimeException("Файл не найден"));
+                .orElseThrow(() -> new FileNotFoundException("Файл не найден"));
         return file.getContent();
     }
 
@@ -36,7 +38,7 @@ public class FileServiceImpl implements FileService {
     @Transactional
     public void deleteFile(User owner, String filename) {
         FileEntity file = fileRepository.findByOwnerAndFilename(owner, filename)
-                .orElseThrow(() -> new RuntimeException("Файл не найден"));
+                .orElseThrow(() -> new FileNotFoundException("Файл не найден"));
         fileRepository.delete(file);
     }
 
@@ -44,7 +46,7 @@ public class FileServiceImpl implements FileService {
     @Transactional
     public void renameFile(User owner, String oldName, String newName) {
         FileEntity file = fileRepository.findByOwnerAndFilename(owner, oldName)
-                .orElseThrow(() -> new RuntimeException("Файл не найден"));
+                .orElseThrow(() -> new FileNotFoundException("Файл не найден"));
         file.setFilename(newName);
         fileRepository.save(file);
     }

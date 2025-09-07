@@ -24,8 +24,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @Testcontainers
 @SpringBootTest
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @ActiveProfiles("test")
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class AuthServiceTest {
 
     @Container
@@ -71,10 +71,10 @@ class AuthServiceTest {
     @Order(1)
     void loginGeneratesToken() {
         String token = authService.login(testEmail, TEST_PASSWORD);
-        assertNotNull(token, "Токен не должен быть null");
+        assertNotNull(token);
 
         List<AuthToken> tokens = authTokenRepository.findAll();
-        assertEquals(1, tokens.size(), "Должен быть один токен в базе");
+        assertEquals(1, tokens.size());
         assertEquals(testEmail, tokens.get(0).getUser().getEmail());
         assertEquals(token, tokens.get(0).getToken());
     }
@@ -82,31 +82,43 @@ class AuthServiceTest {
     @Test
     @Order(2)
     void loginWithWrongPasswordThrows() {
-        UnauthorizedException exception = assertThrows(UnauthorizedException.class,
-                () -> authService.login(testEmail, "wrongpassword"));
-        assertTrue(exception.getMessage().contains("Неверный пароль"));
+        UnauthorizedException ex = assertThrows(UnauthorizedException.class,
+                () -> authService.login(testEmail, "wrong"));
+        assertTrue(ex.getErrors().containsKey("password"));
+        assertArrayEquals(new String[]{"Неверный пароль"}, ex.getErrors().get("password"));
     }
 
     @Test
     @Order(3)
-    void logoutDeletesToken() {
-        String token = authService.login(testEmail, TEST_PASSWORD);
-        authService.logout(token);
-        assertTrue(authTokenRepository.findByToken(token).isEmpty(), "Токен должен быть удалён после logout");
+    void loginWithUnknownEmailThrows() {
+        UnauthorizedException ex = assertThrows(UnauthorizedException.class,
+                () -> authService.login("unknown@example.com", TEST_PASSWORD));
+        assertTrue(ex.getErrors().containsKey("email"));
+        assertArrayEquals(new String[]{"Пользователь не найден"}, ex.getErrors().get("email"));
     }
 
     @Test
     @Order(4)
-    void getUserByTokenReturnsCorrectUser() {
+    void logoutDeletesToken() {
         String token = authService.login(testEmail, TEST_PASSWORD);
-        User user = authService.getUserByToken(token);
-        assertEquals(testEmail, user.getEmail(), "Возвращённый пользователь должен совпадать с email");
+        authService.logout(token);
+        assertTrue(authTokenRepository.findByToken(token).isEmpty());
     }
 
     @Test
     @Order(5)
+    void getUserByTokenReturnsUser() {
+        String token = authService.login(testEmail, TEST_PASSWORD);
+        User user = authService.getUserByToken(token);
+        assertEquals(testEmail, user.getEmail());
+    }
+
+    @Test
+    @Order(6)
     void getUserByInvalidTokenThrows() {
-        assertThrows(UnauthorizedException.class,
-                () -> authService.getUserByToken("invalid-token"), "Должно кидать UnauthorizedException для некорректного токена");
+        UnauthorizedException ex = assertThrows(UnauthorizedException.class,
+                () -> authService.getUserByToken("invalid"));
+        assertTrue(ex.getErrors().containsKey("token"));
+        assertArrayEquals(new String[]{"Неверный токен"}, ex.getErrors().get("token"));
     }
 }

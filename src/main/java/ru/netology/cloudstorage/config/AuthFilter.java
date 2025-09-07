@@ -12,6 +12,7 @@ import ru.netology.cloudstorage.exception.UnauthorizedException;
 import ru.netology.cloudstorage.repository.AuthTokenRepository;
 
 import java.io.IOException;
+import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
@@ -33,13 +34,16 @@ public class AuthFilter extends OncePerRequestFilter {
 
         String tokenValue = request.getHeader("auth-token");
         if (tokenValue == null || tokenValue.isBlank()) {
-            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-            return;
+            throw new UnauthorizedException(
+                    Map.of("token", new String[]{"Токен отсутствует"})
+            );
         }
 
         User user = authTokenRepository.findByToken(tokenValue)
                 .map(t -> t.getUser())
-                .orElseThrow(UnauthorizedException::new);
+                .orElseThrow(() -> new UnauthorizedException(
+                        Map.of("token", new String[]{"Неверный токен"})
+                ));
 
         request.setAttribute("user", user);
         filterChain.doFilter(request, response);

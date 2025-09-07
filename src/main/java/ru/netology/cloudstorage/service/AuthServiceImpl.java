@@ -11,6 +11,8 @@ import ru.netology.cloudstorage.repository.UserRepository;
 import ru.netology.cloudstorage.util.PasswordUtil;
 import ru.netology.cloudstorage.util.TokenUtil;
 
+import java.util.Map;
+
 @Service
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
@@ -22,13 +24,16 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public String login(String email, String password) {
         User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new UnauthorizedException("Пользователь не найден"));
+                .orElseThrow(() -> new UnauthorizedException(
+                        Map.of("email", new String[]{"Пользователь не найден"})
+                ));
 
         if (!user.getPassword().equals(PasswordUtil.hash(password))) {
-            throw new UnauthorizedException("Неверный пароль");
+            throw new UnauthorizedException(
+                    Map.of("password", new String[]{"Неверный пароль"})
+            );
         }
 
-        // удаляем все токены пользователя
         authTokenRepository.deleteByUser(user);
 
         String token = TokenUtil.generateToken();
@@ -50,6 +55,8 @@ public class AuthServiceImpl implements AuthService {
     public User getUserByToken(String token) {
         return authTokenRepository.findByToken(token)
                 .map(AuthToken::getUser)
-                .orElseThrow(UnauthorizedException::new);
+                .orElseThrow(() -> new UnauthorizedException(
+                        Map.of("token", new String[]{"Неверный токен"})
+                ));
     }
 }

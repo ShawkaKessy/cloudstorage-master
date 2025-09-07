@@ -1,4 +1,5 @@
-FROM eclipse-temurin:21-jdk-jammy
+# Stage 1: build
+FROM eclipse-temurin:21-jdk-jammy AS build
 
 WORKDIR /app
 
@@ -6,13 +7,22 @@ COPY .mvn/ .mvn/
 COPY mvnw mvnw
 COPY pom.xml pom.xml
 
-RUN chmod +x mvnw && ./mvnw -q -DskipTests dependency:go-offline
+RUN chmod +x mvnw && ./mvnw -DskipTests dependency:go-offline
 
 COPY src src
 
-RUN ./mvnw -q -DskipTests package
+RUN ./mvnw -DskipTests package
+
+# Stage 2: runtime
+FROM eclipse-temurin:21-jre-jammy
+
+WORKDIR /app
+
+COPY --from=build /app/target/cloudstorage-1.0-SNAPSHOT.jar cloudstorage.jar
 
 EXPOSE 8080
 
-COPY target/cloudstorage-1.0-SNAPSHOT.jar cloudstorage.jar
+# явный контекст для Spring Boot
+ENV SERVER_SERVLET_CONTEXT_PATH=/cloud
+
 CMD ["java", "-jar", "cloudstorage.jar"]

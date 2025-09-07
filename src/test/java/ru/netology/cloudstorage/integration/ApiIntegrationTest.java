@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class ApiIntegrationTest {
 
+    private static final String CONTEXT = "/cloud";
+
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("testdb")
@@ -61,100 +63,103 @@ class ApiIntegrationTest {
 
     @BeforeEach
     void setup() {
-        // Очищаем базы
         authTokenRepository.deleteAll();
         fileRepository.deleteAll();
         userRepository.deleteAll();
 
-        // Создаём пользователя
         testEmail = "user-" + UUID.randomUUID() + "@example.com";
         User user = new User(testEmail, PasswordUtil.hash(TEST_PASSWORD));
         userRepository.save(user);
 
-        // Логинимся и получаем токен
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        String loginJson = "{\"email\":\"" + testEmail + "\",\"password\":\"" + TEST_PASSWORD + "\"}";
-        HttpEntity<String> request = new HttpEntity<>(loginJson, headers);
-
-        ResponseEntity<LoginResponse> response = restTemplate.postForEntity("/login", request, LoginResponse.class);
-        assertEquals(HttpStatus.OK, response.getStatusCode(), "Логин не прошёл");
-
+        HttpEntity<String> request = new HttpEntity<>(jsonLogin(testEmail, TEST_PASSWORD), headersJson());
+        ResponseEntity<LoginResponse> response = restTemplate.postForEntity(CONTEXT + "/login", request, LoginResponse.class);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
         token = response.getBody().authToken();
-        assertNotNull(token, "Токен не получен");
+        assertNotNull(token);
     }
 
-    private HttpHeaders authHeaders(MediaType contentType) {
+    private HttpHeaders headersJson() {
         HttpHeaders headers = new HttpHeaders();
-        headers.set("auth-token", token);
-        headers.setContentType(contentType);
+        headers.setContentType(MediaType.APPLICATION_JSON);
         return headers;
+    }
+
+    private HttpHeaders authHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("auth-token", token);
+        return headers;
+    }
+
+    private String jsonLogin(String email, String password) {
+        return "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}";
+    }
+
+    private String jsonRename(String oldName, String newName) {
+        return "{\"oldFilename\":\"" + oldName + "\",\"newFilename\":\"" + newName + "\"}";
+    }
+
+    private void uploadFile(String filename, byte[] content) {
+        HttpEntity<byte[]> request = new HttpEntity<>(content, authHeaders());
+        ResponseEntity<Void> response = restTemplate.exchange(CONTEXT + "/upload/" + filename, HttpMethod.POST, request, Void.class);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+    }
+
+    private byte[] downloadFile(String filename) {
+        ResponseEntity<byte[]> response = restTemplate.exchange(CONTEXT + "/download/" + filename, HttpMethod.GET,
+                new HttpEntity<>(authHeaders()), byte[].class);
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        return response.getBody();
     }
 
     @Test
     @Order(1)
-    void uploadFile() {
-        String filename = "test.txt";
-        byte[] content = "Hello world".getBytes();
-
-        HttpEntity<byte[]> requestEntity = new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM));
-        ResponseEntity<Void> response = restTemplate.exchange("/upload/" + filename, HttpMethod.POST, requestEntity, Void.class);
-
-        assertEquals(HttpStatus.OK, response.getStatusCode());
+    void loginWithWrongPassword_ReturnsUnauthorized() {
+        HttpEntity<String> request = new HttpEntity<>(jsonLogin(testEmail, "wrongpass"), headersJson());
+        ResponseEntity<String> response = restTemplate.postForEntity(CONTEXT + "/login", request, String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, response.getStatusCode());
+        assertTrue(response.getBody().contains("password"));
+        assertTrue(response.getBody().contains("Неверный пароль"));
     }
 
     @Test
     @Order(2)
-    void downloadFile() {
-        String filename = "download.txt";
-        byte[] content = "Download test".getBytes();
+    void uploadAndDownloadFile() {
+        String filename = "test.txt";
+        byte[] content = "Hello world".getBytes();
+        uploadFile(filename, content);
 
-        // Загружаем файл
-        restTemplate.exchange("/upload/" + filename, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
-
-        // Скачиваем файл
-        ResponseEntity<byte[]> response = restTemplate.exchange("/download/" + filename, HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_OCTET_STREAM)), byte[].class);
-
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertArrayEquals(content, response.getBody());
+        byte[] downloaded = downloadFile(filename);
+        assertArrayEquals(content, downloaded);
     }
 
     @Test
     @Order(3)
-    void renameFile() {
+    void renameAndCheckFile() {
         String oldName = "old.txt";
         String newName = "new.txt";
         byte[] content = "Rename test".getBytes();
 
-        // Загружаем старый файл
-        restTemplate.exchange("/upload/" + oldName, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
+        uploadFile(oldName, content);
 
-        // Переименовываем файл
-        String renameJson = "{\"oldFilename\":\"" + oldName + "\",\"newFilename\":\"" + newName + "\"}";
-        HttpEntity<String> renameRequest = new HttpEntity<>(renameJson, authHeaders(MediaType.APPLICATION_JSON));
-        ResponseEntity<Void> renameResponse = restTemplate.exchange("/file", HttpMethod.PUT, renameRequest, Void.class);
+        HttpEntity<String> renameRequest = new HttpEntity<>(jsonRename(oldName, newName), authHeaders());
+        ResponseEntity<Void> renameResponse = restTemplate.exchange(CONTEXT + "/file", HttpMethod.PUT, renameRequest, Void.class);
         assertEquals(HttpStatus.OK, renameResponse.getStatusCode());
 
-        // Проверяем новый файл
-        ResponseEntity<byte[]> response = restTemplate.exchange("/download/" + newName, HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_OCTET_STREAM)), byte[].class);
-        assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertArrayEquals(content, response.getBody());
+        byte[] downloaded = downloadFile(newName);
+        assertArrayEquals(content, downloaded);
     }
 
     @Test
     @Order(4)
-    void listFiles() {
-        String[] filenames = {"file1.txt", "file2.txt"};
-        byte[] content = "List test".getBytes();
+    void listFiles_ReturnsAllFiles() {
+        uploadFile("file1.txt", "A".getBytes());
+        uploadFile("file2.txt", "B".getBytes());
 
-        for (String filename : filenames) {
-            restTemplate.exchange("/upload/" + filename, HttpMethod.POST, new HttpEntity<>(content, authHeaders(MediaType.APPLICATION_OCTET_STREAM)), Void.class);
-        }
-
-        ResponseEntity<String> response = restTemplate.exchange("/list", HttpMethod.GET, new HttpEntity<>(authHeaders(MediaType.APPLICATION_JSON)), String.class);
+        ResponseEntity<String> response = restTemplate.exchange(CONTEXT + "/list", HttpMethod.GET,
+                new HttpEntity<>(authHeaders()), String.class);
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        for (String filename : filenames) {
-            assertTrue(response.getBody().contains(filename), "Список файлов должен содержать " + filename);
-        }
+        assertTrue(response.getBody().contains("file1.txt"));
+        assertTrue(response.getBody().contains("file2.txt"));
     }
 }
